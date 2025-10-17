@@ -19,7 +19,23 @@
 
 namespace sjtu {
 class int2048 {
-  // todo
+private:
+  static const unsigned int BASE = 10000U; // 1e4 base per limb
+  std::vector<unsigned int> limbs;              // little-endian limbs
+  bool negative = false;                        // sign flag, false means non-negative
+
+  // remove leading zero limbs and fix sign if zero
+  void normalize();
+
+  // absolute-value helpers (do not touch sign)
+  static int compareAbs(const int2048 &a, const int2048 &b);
+  static int2048 addAbs(const int2048 &a, const int2048 &b);
+  // precondition: |a| >= |b|
+  static int2048 subAbs(const int2048 &a, const int2048 &b);
+  static int2048 mulAbs(const int2048 &a, const int2048 &b);
+  // returns (q, r) with 0 <= r < |b|, both non-negative (absolute division)
+  static void divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 &r);
+
 public:
   // 构造函数
   int2048();
