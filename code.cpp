@@ -1,12 +1,103 @@
-#include "int2048.h"
+#include <complex>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <vector>
+
+// ====== Begin Interface (from int2048.h) ======
+#pragma once
+#ifndef SJTU_BIGINTEGER
+#define SJTU_BIGINTEGER
 
 namespace sjtu {
+class int2048 {
+private:
+  static const unsigned int BASE = 10000U; // 1e4 base per limb
+  std::vector<unsigned int> limbs;              // little-endian limbs
+  bool negative = false;                        // sign flag, false means non-negative
 
-// ===== Utility local functions (no extra headers allowed) =====
-static inline unsigned int max_ui(unsigned int a, unsigned int b) { return a > b ? a : b; }
-static inline unsigned int min_ui(unsigned int a, unsigned int b) { return a < b ? a : b; }
+  // remove leading zero limbs and fix sign if zero
+  void normalize();
 
-// ===== int2048 private helpers declarations are in header =====
+  // absolute-value helpers (do not touch sign)
+  static int compareAbs(const int2048 &a, const int2048 &b);
+  static int2048 addAbs(const int2048 &a, const int2048 &b);
+  // precondition: |a| >= |b|
+  static int2048 subAbs(const int2048 &a, const int2048 &b);
+  static int2048 mulAbs(const int2048 &a, const int2048 &b);
+  // returns (q, r) with 0 <= r < |b|, both non-negative (absolute division)
+  static void divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 &r);
+
+public:
+  // 构造函数
+  int2048();
+  int2048(long long);
+  int2048(const std::string &);
+  int2048(const int2048 &);
+
+  // ===================================
+  // Integer1
+  // ===================================
+
+  // 读入一个大整数
+  void read(const std::string &);
+  // 输出储存的大整数，无需换行
+  void print();
+
+  // 加上一个大整数
+  int2048 &add(const int2048 &);
+  // 返回两个大整数之和
+  friend int2048 add(int2048, const int2048 &);
+
+  // 减去一个大整数
+  int2048 &minus(const int2048 &);
+  // 返回两个大整数之差
+  friend int2048 minus(int2048, const int2048 &);
+
+  // ===================================
+  // Integer2
+  // ===================================
+
+  int2048 operator+() const;
+  int2048 operator-() const;
+
+  int2048 &operator=(const int2048 &);
+
+  int2048 &operator+=(const int2048 &);
+  friend int2048 operator+(int2048, const int2048 &);
+
+  int2048 &operator-=(const int2048 &);
+  friend int2048 operator-(int2048, const int2048 &);
+
+  int2048 &operator*=(const int2048 &);
+  friend int2048 operator*(int2048, const int2048 &);
+
+  int2048 &operator/=(const int2048 &);
+  friend int2048 operator/(int2048, const int2048 &);
+
+  int2048 &operator%=(const int2048 &);
+  friend int2048 operator%(int2048, const int2048 &);
+
+  friend std::istream &operator>>(std::istream &, int2048 &);
+  friend std::ostream &operator<<(std::ostream &, const int2048 &);
+
+  friend bool operator==(const int2048 &, const int2048 &);
+  friend bool operator!=(const int2048 &, const int2048 &);
+  friend bool operator<(const int2048 &, const int2048 &);
+  friend bool operator>(const int2048 &, const int2048 &);
+  friend bool operator<=(const int2048 &, const int2048 &);
+  friend bool operator>=(const int2048 &, const int2048 &);
+};
+} // namespace sjtu
+
+#endif
+// ====== End Interface ======
+
+// ====== Begin Implementation (from int2048.cpp) ======
+namespace sjtu {
+
+using cd = std::complex<double>;
+static void fft(std::vector<cd> &a, bool invert);
 
 // Normalize: remove leading zeros; if zero, make sign non-negative
 void int2048::normalize() {
@@ -63,21 +154,13 @@ int2048 int2048::subAbs(const int2048 &a, const int2048 &b) {
   return res;
 }
 
-// FFT-based multiplication for speed
-using cd = std::complex<double>;
-
 static void fft(std::vector<cd> &a, bool invert) {
   const size_t n = a.size();
-  // bit-reversal permutation
   for (size_t i = 1, j = 0; i < n; ++i) {
     size_t bit = n >> 1;
     for (; j & bit; bit >>= 1) j ^= bit;
     j ^= bit;
-    if (i < j) {
-      cd tmp = a[i];
-      a[i] = a[j];
-      a[j] = tmp;
-    }
+    if (i < j) std::swap(a[i], a[j]);
   }
   for (size_t len = 2; len <= n; len <<= 1) {
     double ang = (invert ? -1.0 : 1.0) * (2.0) * 3.14159265358979323846 / (double)len;
@@ -133,16 +216,14 @@ int2048 int2048::mulAbs(const int2048 &a, const int2048 &b) {
   return res;
 }
 
-// Long division (absolute), returns q, r with both non-negative (r < |b|)
 void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 &r) {
   q.limbs.clear(); q.negative = false;
   r.limbs.clear(); r.negative = false;
-  if (b.limbs.empty()) return; // undefined, but won't be tested
-  if (a.limbs.empty()) return; // q=0,r=0
+  if (b.limbs.empty()) return; // undefined
+  if (a.limbs.empty()) return; // zero
   int cmp = compareAbs(a, b);
   if (cmp < 0) { r = a; return; }
   if (b.limbs.size() == 1) {
-    // divide by single limb
     unsigned int d = b.limbs[0];
     q.limbs.resize(a.limbs.size());
     unsigned long long rem = 0ULL;
@@ -152,24 +233,20 @@ void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 
       rem = cur % d;
     }
     q.normalize();
-    if (rem) { r.limbs.push_back((unsigned int)rem); }
+    if (rem) r.limbs.push_back((unsigned int)rem);
     r.normalize();
     return;
   }
-  // General long division (Knuth-like, with estimation)
   const unsigned int BASE = int2048::BASE;
   const size_t n = a.limbs.size();
   const size_t m = b.limbs.size();
-  // copy dividend to working vector u with extra leading zero
   std::vector<unsigned int> u(n + 1, 0);
   for (size_t i = 0; i < n; ++i) u[i] = a.limbs[i];
-  std::vector<unsigned int> v = b.limbs; // copy divisor
+  std::vector<unsigned int> v = b.limbs;
   q.limbs.assign(n - m + 1, 0);
 
-  // Normalization factor d so that v[m-1] >= BASE/2
-  unsigned int norm = (unsigned int)(BASE / ( (unsigned long long)v[m-1] + 1ULL));
+  unsigned int norm = (unsigned int)(BASE / ((unsigned long long)v[m - 1] + 1ULL));
   if (norm > 1) {
-    // multiply u and v by norm
     unsigned long long carry = 0ULL;
     for (size_t i = 0; i < n; ++i) {
       unsigned long long cur = (unsigned long long)u[i] * norm + carry;
@@ -186,19 +263,16 @@ void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 
   }
 
   for (int k = (int)(n - m); k >= 0; --k) {
-    // estimate qhat = (u[k+m]*BASE + u[k+m-1]) / v[m-1]
     unsigned long long u2 = (unsigned long long)u[k + m] * BASE + u[k + m - 1];
     unsigned long long qhat = u2 / v[m - 1];
     unsigned long long rhat = u2 % v[m - 1];
     if (qhat >= BASE) { qhat = BASE - 1; rhat += v[m - 1]; }
-    // refine using next digit
     while (m >= 2 && qhat * v[m - 2] > rhat * BASE + u[k + m - 2]) {
       --qhat;
       rhat += v[m - 1];
       if (rhat >= BASE) break;
     }
 
-    // subtract qhat * v from u at position k
     long long borrow = 0;
     unsigned long long carry = 0ULL;
     for (size_t j = 0; j < m; ++j) {
@@ -210,7 +284,6 @@ void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 
     }
     long long cur = (long long)u[k + m] - (long long)carry - borrow;
     if (cur < 0) {
-      // qhat was too big; decrement and add v back
       --qhat;
       unsigned long long c = 0ULL;
       for (size_t j = 0; j < m; ++j) {
@@ -225,7 +298,6 @@ void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 
     q.limbs[k] = (unsigned int)qhat;
   }
 
-  // denormalize remainder
   r.limbs.assign(m, 0);
   for (size_t i = 0; i < m; ++i) r.limbs[i] = u[i];
   if (norm > 1) {
@@ -240,10 +312,9 @@ void int2048::divModAbs(const int2048 &a, const int2048 &b, int2048 &q, int2048 
   r.normalize();
 }
 
-// ===== Constructors =====
 int2048::int2048() {}
 
-int2048::int2048(long long val) { // handle negative
+int2048::int2048(long long val) {
   if (val < 0) { negative = true; val = -val; } else { negative = false; }
   const unsigned int BASE = int2048::BASE;
   while (val) {
@@ -257,14 +328,12 @@ int2048::int2048(const std::string &s) { read(s); }
 
 int2048::int2048(const int2048 &other) { limbs = other.limbs; negative = other.negative; }
 
-// ===== Basic operations =====
 void int2048::read(const std::string &s) {
   limbs.clear(); negative = false;
   if (s.empty()) return;
   size_t i = 0; bool neg = false;
   if (s[0] == '+') { i = 1; }
   else if (s[0] == '-') { neg = true; i = 1; }
-  // skip leading zeros
   while (i < s.size() && s[i] == '0') ++i;
   const unsigned int BASE = int2048::BASE;
   const unsigned int WIDTH = (BASE == 1000U) ? 3U : (BASE == 10000U ? 4U : 9U);
@@ -280,9 +349,7 @@ void int2048::read(const std::string &s) {
     j = start;
     if (j == i) break;
   }
-  // parts holds base-10^WIDTH chunks in big-endian most->least; but we pushed from end, so it's little-endian
-  // direct assign to limbs
-  limbs = parts; // little-endian
+  limbs = parts;
   negative = neg;
   normalize();
 }
@@ -292,12 +359,9 @@ void int2048::print() {
   if (negative) std::cout << '-';
   const unsigned int BASE = int2048::BASE;
   const unsigned int WIDTH = (BASE == 1000U) ? 3U : (BASE == 10000U ? 4U : 9U);
-  // print most significant limb without padding
   std::cout << limbs.back();
-  // print remaining with zero-padding
   for (int i = (int)limbs.size() - 2; i >= 0; --i) {
     unsigned int x = limbs[i];
-    // print x as WIDTH digits with leading zeros
     unsigned int pow10 = 1;
     for (unsigned int t = 1; t < WIDTH; ++t) pow10 *= 10U;
     while (pow10) {
@@ -307,22 +371,18 @@ void int2048::print() {
   }
 }
 
-// add in-place
 int2048 &int2048::add(const int2048 &rhs) {
   if (rhs.limbs.empty()) return *this;
   if (limbs.empty()) { *this = rhs; return *this; }
   if (negative == rhs.negative) {
-    bool oldSign = this->negative;
     *this = addAbs(*this, rhs);
-    this->negative = oldSign; // keep sign
+    this->negative = negative;
   } else {
     int cmp = compareAbs(*this, rhs);
     if (cmp == 0) {
       limbs.clear(); negative = false;
     } else if (cmp > 0) {
-      bool oldSign = this->negative;
       *this = subAbs(*this, rhs);
-      this->negative = oldSign;
     } else {
       *this = subAbs(rhs, *this);
       this->negative = rhs.negative;
@@ -333,7 +393,6 @@ int2048 &int2048::add(const int2048 &rhs) {
 
 int2048 add(int2048 a, const int2048 &b) { return a.add(b); }
 
-// minus in-place
 int2048 &int2048::minus(const int2048 &rhs) {
   if (rhs.limbs.empty()) return *this;
   int2048 tmp = rhs; tmp.negative = !tmp.negative;
@@ -342,7 +401,6 @@ int2048 &int2048::minus(const int2048 &rhs) {
 
 int2048 minus(int2048 a, const int2048 &b) { return a.minus(b); }
 
-// ===== Operator overloading =====
 int2048 int2048::operator+() const { return *this; }
 int2048 int2048::operator-() const {
   int2048 t(*this);
@@ -371,8 +429,7 @@ int2048 &int2048::operator*=(const int2048 &rhs) {
 int2048 operator*(int2048 a, const int2048 &b) { a *= b; return a; }
 
 int2048 &int2048::operator/=(const int2048 &rhs) {
-  // floor division
-  if (rhs.limbs.empty()) return *this; // undefined, ignore
+  if (rhs.limbs.empty()) return *this;
   if (limbs.empty()) { negative = false; return *this; }
   int2048 aAbs = *this; aAbs.negative = false;
   int2048 bAbs = rhs;  bAbs.negative = false;
@@ -385,7 +442,6 @@ int2048 &int2048::operator/=(const int2048 &rhs) {
     if (r.limbs.empty()) {
       *this = q; this->negative = true; this->normalize();
     } else {
-      // floor: negative result rounds down -> -(q+1)
       q = addAbs(q, int2048(1));
       *this = q; this->negative = true; this->normalize();
     }
@@ -395,8 +451,7 @@ int2048 &int2048::operator/=(const int2048 &rhs) {
 int2048 operator/(int2048 a, const int2048 &b) { a /= b; return a; }
 
 int2048 &int2048::operator%=(const int2048 &rhs) {
-  // r = a - (a / b) * b, with floor division behavior
-  if (rhs.limbs.empty()) return *this; // undefined
+  if (rhs.limbs.empty()) return *this;
   if (limbs.empty()) { negative = false; return *this; }
   int2048 q = (*this) / rhs;
   int2048 prod = q * rhs;
@@ -405,7 +460,6 @@ int2048 &int2048::operator%=(const int2048 &rhs) {
 }
 int2048 operator%(int2048 a, const int2048 &b) { a %= b; return a; }
 
-// ===== Stream operators =====
 std::istream &operator>>(std::istream &is, int2048 &x) {
   std::string s; is >> s; x.read(s); return is;
 }
@@ -427,7 +481,6 @@ std::ostream &operator<<(std::ostream &os, const int2048 &x) {
   return os;
 }
 
-// ===== Comparisons =====
 bool operator==(const int2048 &a, const int2048 &b) {
   if (a.negative != b.negative) return a.limbs.empty() && b.limbs.empty();
   return a.limbs == b.limbs;
@@ -436,11 +489,12 @@ bool operator!=(const int2048 &a, const int2048 &b) { return !(a == b); }
 bool operator<(const int2048 &a, const int2048 &b) {
   if (a.negative != b.negative) return a.negative && (!a.limbs.empty() || !b.limbs.empty());
   int cmp = int2048::compareAbs(a, b);
-  if (!a.negative) return cmp < 0; // both non-negative
-  return cmp > 0; // both negative
+  if (!a.negative) return cmp < 0;
+  return cmp > 0;
 }
 bool operator>(const int2048 &a, const int2048 &b) { return b < a; }
 bool operator<=(const int2048 &a, const int2048 &b) { return !(b < a); }
 bool operator>=(const int2048 &a, const int2048 &b) { return !(a < b); }
 
 } // namespace sjtu
+// ====== End Implementation ======
